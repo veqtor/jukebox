@@ -13,7 +13,7 @@ from jukebox.utils.dist_utils import print_once
 import fire
 
 # Sample a partial window of length<n_ctx with tokens_to_sample new tokens on level=level
-def sample_partial_window(zs, labels, sampling_kwargs, level, prior, tokens_to_sample, hps):
+def sample_partial_window(zs, labels, sampling_kwargs, level, prior, tokens_to_sample, hps, other_labels=None, alpha=0.):
     z = zs[level]
     n_ctx = prior.n_ctx
     current_tokens = z.shape[1]
@@ -24,10 +24,10 @@ def sample_partial_window(zs, labels, sampling_kwargs, level, prior, tokens_to_s
         sampling_kwargs['sample_tokens'] = n_ctx
         start = current_tokens - n_ctx + tokens_to_sample
 
-    return sample_single_window(zs, labels, sampling_kwargs, level, prior, start, hps)
+    return sample_single_window(zs, labels, sampling_kwargs, level, prior, start, hps, other_labels=other_labels, alpha=alpha)
 
 # Sample a single window of length=n_ctx at position=start on level=level
-def sample_single_window(zs, labels, sampling_kwargs, level, prior, start, hps):
+def sample_single_window(zs, labels, sampling_kwargs, level, prior, start, hps, other_labels=None, alpha=0.):
     n_samples = hps.n_samples
     n_ctx = prior.n_ctx
     end = start + n_ctx
@@ -53,6 +53,13 @@ def sample_single_window(zs, labels, sampling_kwargs, level, prior, start, hps):
 
     # set y offset, sample_length and lyrics tokens
     y = prior.get_y(labels, start)
+    if other_labels is not None:
+        if type(other_labels) == list:
+            other_y = [prior.get_y(other_label, start) for other_label in other_labels]
+        else:
+            other_y = prior.get_y(other_labels, start)
+    else:
+        other_y = None
 
     empty_cache()
 
@@ -65,7 +72,7 @@ def sample_single_window(zs, labels, sampling_kwargs, level, prior, start, hps):
     y_list = split_batch(y, n_samples, max_batch_size)
     z_samples = []
     for z_i, z_conds_i, y_i in zip(z_list, z_conds_list, y_list):
-        z_samples_i = prior.sample(n_samples=z_i.shape[0], z=z_i, z_conds=z_conds_i, y=y_i, **sampling_kwargs)
+        z_samples_i = prior.sample(n_samples=z_i.shape[0], z=z_i, z_conds=z_conds_i, y=y_i, other_y=other_y, alpha=alpha, **sampling_kwargs)
         z_samples.append(z_samples_i)
     z = t.cat(z_samples, dim=0)
 
@@ -77,17 +84,17 @@ def sample_single_window(zs, labels, sampling_kwargs, level, prior, start, hps):
     return zs
 
 # Sample total_length tokens at level=level with hop_length=hop_length
-def sample_level(zs, labels, sampling_kwargs, level, prior, total_length, hop_length, hps):
+def sample_level(zs, labels, sampling_kwargs, level, prior, total_length, hop_length, hps, other_labels=None, alpha=0.):
     print_once(f"Sampling level {level}")
     if total_length >= prior.n_ctx:
         for start in get_starts(total_length, prior.n_ctx, hop_length):
-            zs = sample_single_window(zs, labels, sampling_kwargs, level, prior, start, hps)
+            zs = sample_single_window(zs, labels, sampling_kwargs, level, prior, start, hps, other_labels, alpha)
     else:
-        zs = sample_partial_window(zs, labels, sampling_kwargs, level, prior, total_length, hps)
+        zs = sample_partial_window(zs, labels, sampling_kwargs, level, prior, total_length, hps, other_labels, alpha)
     return zs
 
 # Sample multiple levels
-def _sample(zs, labels, sampling_kwargs, priors, sample_levels, hps):
+def _sample(zs, labels, sampling_kwargs, priors, sample_levels, hps, other_labels=[None, None, None, None], alpha=0.,):
     alignments = None
     for level in reversed(sample_levels):
         prior = priors[level]
@@ -98,7 +105,8 @@ def _sample(zs, labels, sampling_kwargs, priors, sample_levels, hps):
         assert hps.sample_length % prior.raw_to_tokens == 0, f"Expected sample_length {hps.sample_length} to be multiple of {prior.raw_to_tokens}"
         total_length = hps.sample_length//prior.raw_to_tokens
         hop_length = int(hps.hop_fraction[level]*prior.n_ctx)
-        zs = sample_level(zs, labels[level], sampling_kwargs[level], level, prior, total_length, hop_length, hps)
+
+        zs = sample_level(zs, labels[level], sampling_kwargs[level], level, prior, total_length, hop_length, hps, other_labels=other_labels[level], alpha=alpha)
 
         prior.cpu()
         empty_cache()
@@ -130,9 +138,9 @@ def continue_sample(zs, labels, sampling_kwargs, priors, hps):
     return zs
 
 # Upsample given already generated upper-level codes
-def upsample(zs, labels, sampling_kwargs, priors, hps):
+def upsample(zs, labels, sampling_kwargs, priors, hps, other_labels=None, alpha=0.):
     sample_levels = list(range(len(priors) - 1))
-    zs = _sample(zs, labels, sampling_kwargs, priors, sample_levels, hps)
+    zs = _sample(zs, labels, sampling_kwargs, priors, sample_levels, hps, other_labels=other_labels, alpha=alpha)
     return zs
 
 # Prompt the model with raw audio input (dimension: NTC) and generate continuations

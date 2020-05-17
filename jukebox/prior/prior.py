@@ -227,7 +227,16 @@ class SimplePrior(nn.Module):
             x_out = self.decoder(zs, start_level=start_level, end_level=end_level, bs_chunks=bs_chunks)
         return x_out
 
-    def get_cond(self, z_conds, y):
+    def slerp(self, val, low, high):
+        low_norm = low / t.norm(low, dim=-1, keepdim=True)
+        high_norm = high / t.norm(high, dim=-1, keepdim=True)
+        omega = t.acos((low_norm * high_norm).sum(-1))
+        so = t.sin(omega)
+        res = (t.sin((1.0 - val) * omega) / so).unsqueeze(-1) * low + (t.sin(val * omega) / so).unsqueeze(
+            -1) * high
+        return res
+
+    def get_cond(self, z_conds, y, another_y=None, alpha=0.):
         if y is not None:
             assert y.shape[1] == 4 + self.y_emb.max_bow_genre_size + self.n_tokens, f"Expected {4} + {self.y_emb.max_bow_genre_size} + {self.n_tokens}, got {y.shape[1]}"
             n_labels = y.shape[1] - self.n_tokens
@@ -235,10 +244,28 @@ class SimplePrior(nn.Module):
         else:
             y, prime = None, None
         y_cond, y_pos = self.y_emb(y) if self.y_cond else (None, None)
+        if self.y_cond and another_y is not None:
+            if type(another_y) == list:
+                if type(alpha) != list:
+                    alpha = [alpha] * len(another_y)
+                for ay, _alpha in zip(another_y, alpha):
+                    assert y.shape[0] == ay.shape[0], "Label batch size is different."
+                    n_labels = ay.shape[1] - self.n_tokens
+                    ay = ay[:, :n_labels]
+                    another_y_cond, _ = self.y_emb(ay)
+                    y_cond = self.slerp(_alpha, y_cond, another_y_cond)
+                    #y_cond * _alpha + another_y_cond * (1.0 - _alpha)
+                    #self.slerp(_alpha, y_cond, another_y_cond)
+            else:
+                assert y.shape[0] == another_y.shape[0], "Label batch size is different."
+                n_labels = another_y.shape[1] - self.n_tokens
+                another_y = another_y[:, :n_labels]
+                another_y_cond, _ = self.y_emb(another_y)
+                y_cond = self.slerp(alpha, y_cond, another_y_cond)#y_cond * alpha + another_y_cond * (1.0 - alpha)
         x_cond = self.x_emb(z_conds) if self.x_cond else y_pos
         return x_cond, y_cond, prime
 
-    def sample(self, n_samples, z=None, z_conds=None, y=None, fp16=False, temp=1.0, top_k=0, top_p=0.0,
+    def sample(self, n_samples, z=None, z_conds=None, y=None, other_y=None, alpha=0.1, fp16=False, temp=1.0, top_k=0, top_p=0.0,
                chunk_size=None, sample_tokens=None):
         N = n_samples
         if z is not None: assert z.shape[0] == N, f"Expected shape ({N},**), got shape {z.shape}"
@@ -254,7 +281,7 @@ class SimplePrior(nn.Module):
 
         with t.no_grad():
             # Currently x_cond only uses immediately above layer
-            x_cond, y_cond, prime = self.get_cond(z_conds, y)
+            x_cond, y_cond, prime = self.get_cond(z_conds, y, another_y=other_y, alpha=alpha)
             if self.single_enc_dec:
                 # assert chunk_size % self.prime_loss_dims == 0. TODO: Check if needed
                 if no_past_context:
