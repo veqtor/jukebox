@@ -15,12 +15,19 @@ class OffsetDataset(Dataset):
         self.start = start
         self.end = end
         self.test = test
+        self._warned_list = False
         assert 0 <= self.start < self.end <= len(self.dataset)
 
     def __len__(self):
         return self.end - self.start
 
     def __getitem__(self, item):
+        if type(item) == list:
+            if not self._warned_list and len(item) > 1:
+                print('Warning, __getitem__ called with list of len %d' % len(item))
+                print('Item', item)
+                self._warned_list = True
+            return self.dataset.get_item(self.start + random.choice(item), test=self.test)#np.asarray([self.dataset.get_item(self.start + i, test=self.test) for i in item])
         return self.dataset.get_item(self.start + item, test=self.test)
 
 
