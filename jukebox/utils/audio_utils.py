@@ -24,7 +24,7 @@ def calculate_bandwidth(dataset, hps, duration=600):
     n_samples = int(dataset.sr * duration)
     l1, total, total_sq, n_seen, idx = 0.0, 0.0, 0.0, 0.0, dist.get_rank()
     spec_norm_total, spec_nelem = 0.0, 0.0
-    while n_seen < n_samples:
+    while n_seen < n_samples and idx < len(dataset):
         x = dataset[idx]
         if isinstance(x, (tuple, list)):
             x, y = x
@@ -55,6 +55,11 @@ def calculate_bandwidth(dataset, hps, duration=600):
     print_once(bandwidth)
     return bandwidth
 
+def normalize(x, dim=1):
+    #Normalize:
+    return x / t.clamp(t.max(x.abs(), dim=dim, keepdim=True, out=None)[0], min=0.99, max=10.)
+
+
 def audio_preprocess(x, hps):
     # Extra layer in case we want to experiment with different preprocessing
     # For two channel, blend randomly into mono (standard is .5 left, .5 right)
@@ -74,6 +79,7 @@ def audio_preprocess(x, hps):
 
     # x: NT -> NTC
     x = x.unsqueeze(2)
+    x = normalize(x)
     return x
 
 def audio_postprocess(x, hps):
@@ -141,6 +147,7 @@ def load_audio(file, sr, offset, duration, mono=False):
 
 def save_wav(fname, aud, sr):
     # clip before saving?
+    aud = normalize(aud)
     aud = t.clamp(aud, -1, 1).cpu().numpy()
     for i in list(range(aud.shape[0])):
         soundfile.write(f'{fname}/item_{i}.wav', aud[i], samplerate=sr, format='wav')

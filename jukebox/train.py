@@ -108,8 +108,11 @@ def log_inputs(orig_model, logger, x_in, y, x_out, hps, tag="train"):
     else:
         zs_in = orig_model.encode(x_in, start_level=0, bs_chunks=bs)
         x_ds = [orig_model.decode(zs_in[level:], start_level=level, bs_chunks=bs) for level in range(0, hps.levels)]
+        n_dim = 0
+        if len(x_ds[0].shape) == 3:
+            n_dim = 1
         for i in range(len(x_ds)):
-            log_aud(logger, f'{tag}_x_ds_start_{i}', x_ds[i], hps)
+            log_aud(logger, f'{tag}_x_ds_start_{i}', normalize(x_ds[i], dim=n_dim), hps)
     logger.flush()
 
 def sample_prior(orig_model, ema, logger, x_in, y, hps):
@@ -312,7 +315,7 @@ def run(hps="teeny", port=29500, **kwargs):
     # Setup opt, ema and distributed_model.
     opt, shd, scalar = get_optimizer(model, hps)
     ema = get_ema(model, hps)
-    distributed_model = get_ddp(model, hps)
+    distributed_model = model#get_ddp(model, hps)
 
     logger, metrics = init_logging(hps, local_rank, rank)
     logger.iters = model.step

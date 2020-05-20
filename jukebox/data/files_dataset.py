@@ -28,12 +28,14 @@ class FilesAudioDataset(Dataset):
                 continue
             if durations[i] / self.sr >= self.max_duration:
                 continue
+            if durations[i] < 0:
+                continue
             keep.append(i)
         print_all(f'self.sr={self.sr}, min: {self.min_duration}, max: {self.max_duration}')
         print_all(f"Keeping {len(keep)} of {len(files)} files")
         self.files = [files[i] for i in keep]
-        self.durations = [int(durations[i]) for i in keep]
-        self.cumsum = np.cumsum(self.durations)
+        self.durations = [abs(int(durations[i])) for i in keep]
+        self.cumsum = np.cumsum(self.durations, dtype=np.int64)
 
     def init_dataset(self, hps):
         # Load list of files and starts/durations

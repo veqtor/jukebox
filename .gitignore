@@ -131,3 +131,8 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+*.wav
+*.dur
+*.mp3
+*.m4a
+logs/

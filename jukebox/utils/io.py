@@ -11,7 +11,7 @@ def get_duration_sec(file, cache=False):
     except:
         container = av.open(file)
         audio = container.streams.get(audio=0)[0]
-        duration = audio.duration * float(audio.time_base)
+        duration = abs(audio.duration) * abs(float(audio.time_base))
         if cache:
             with open(file + '.dur', 'w') as f:
                 f.write(str(duration) + '\n')
@@ -33,7 +33,7 @@ def load_audio(file, sr, offset, duration, resample=True, approx=False, time_bas
         if check_duration:
             assert offset + duration <= audio_duration*sr, f'End {offset + duration} beyond duration {audio_duration*sr}'
     if resample:
-        resampler = av.AudioResampler(format='fltp',layout='stereo', rate=sr)
+        resampler = av.AudioResampler(format='fltp', layout='stereo', rate=sr)
     else:
         assert sr == audio.sample_rate
     offset = int(offset / sr / float(audio.time_base)) #int(offset / float(audio.time_base)) # Use units of time_base for seeking
